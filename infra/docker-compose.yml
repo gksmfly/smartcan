@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: smartcan-postgres
+    environment:
+      POSTGRES_DB: smartcan
+      POSTGRES_USER: smartcan
+      POSTGRES_PASSWORD: 1234
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  mqtt:
+    image: eclipse-mosquitto:2
+    container_name: smartcan-mqtt
+    ports:
+      - "1883:1883"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

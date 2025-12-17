@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+sqlalchemy>=2.0
+psycopg2-binary
+pydantic-settings
+pydantic>=2.0
+python-dotenv
+paho-mqtt
+numpy
+pandas
+torch
+joblib
+scikit-learn

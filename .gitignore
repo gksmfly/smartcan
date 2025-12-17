@@ -1,0 +1,23 @@
+# Android
+.gradle/
+local.properties
+*.iml
+.idea/
+build/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
+
+# ML / Model
+*.h5
+*.pt
+*.ckpt
+*.onnx
+data/
+logs/
+
+# Mac
+.DS_Store

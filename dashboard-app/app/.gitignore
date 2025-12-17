@@ -1,0 +1,21 @@
+# Gradle / build
+.gradle/
+**/build/
+
+# Local config
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+
+# Keystore (원하면 예외 처리)
+*.jks
+*.keystore
+
+# Logs
+*.log
+
+# Mac/Windows junk
+.DS_Store
+Thumbs.db
