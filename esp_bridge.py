@@ -6,9 +6,9 @@ import paho.mqtt.client as mqtt
 # =========================
 # 설정
 # =========================
-# 👉 Mac 예: "/dev/cu.usbmodem141011"
-# 👉 Windows 예: "COM5"
-SERIAL_PORT = "/dev/cu.usbmodem141011"
+# 👉 Windows: "COM5", "COM3" 처럼 사용
+# 👉 Mac    : "/dev/cu.usbmodem141011" 이런 식으로 사용
+SERIAL_PORT = "COM5"
 BAUD_RATE = 9600
 
 MQTT_HOST = "localhost"
@@ -19,7 +19,7 @@ print(f"[CFG] SERIAL_PORT={SERIAL_PORT}, BAUD_RATE={BAUD_RATE}")
 print(f"[CFG] MQTT={MQTT_HOST}:{MQTT_PORT}")
 
 # =========================
-# Serial 연결
+# 시리얼 포트 오픈
 # =========================
 try:
     ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0.1)
@@ -27,7 +27,6 @@ try:
 except Exception as e:
     print("[SERIAL] ERROR: cannot open serial port:", e)
     raise
-
 
 # =========================
 # MQTT 클라이언트
@@ -37,51 +36,68 @@ client = mqtt.Client(client_id="pc-bridge")
 
 def on_connect(c, userdata, flags, rc, properties=None):
     print("[MQTT] connected rc=", rc)
+    # 서버 → 하드웨어 방향: fill, corr 명령 구독
     c.subscribe("line1/cmd/fill", qos=1)
+    c.subscribe("line1/cmd/corr", qos=1)
 
 
 def on_message(c, userdata, msg):
     payload = msg.payload.decode("utf-8", errors="ignore")
     print(f"[MQTT] recv {msg.topic}: {payload}")
 
-    # ======================================================
-    #   서버 → ESP → UNO : fill 명령 처리
-    # ======================================================
+    # 서버에서 내려온 fill JSON → UNO가 이해하는 "F,..." 형식으로 변환
     if msg.topic == "line1/cmd/fill":
         try:
             data = json.loads(payload)
         except json.JSONDecodeError:
-            print("[WARN] invalid JSON payload")
+            print("[WARN] invalid JSON payload for fill cmd")
             return
 
+        # JSON에서 값 꺼내기 (키 이름 여러 케이스 방어)
         seq = int(data.get("seq", 0))
-        target_ml = float(data.get("target_ml") or data.get("target_amount") or 0.0)
-        valve_ms = float(data.get("valve_ms") or data.get("valve_time") or 0.0)
-        mode = str(data.get("mode", "SIM"))
 
-        valve_ms_int = int(valve_ms)
+        target_ml = float(
+            data.get("target_ml")
+            or data.get("target_amount")
+            or 0.0
+        )
 
-        # UNO 명령 포맷
-        cmd = f"F,{seq},{target_ml},{mode},{valve_ms_int}\n"
+        mode = data.get("mode", "SIM")
 
+        valve_ms = int(
+            float(
+                data.get("valve_ms")
+                or data.get("valve_time")
+                or 0
+            )
+        )
+
+        # UNO가 기대하는 포맷: F,seq,target_ml,mode,valve_ms
+        line = f"F,{seq},{target_ml},{mode},{valve_ms}\n"
         try:
-            ser.write(cmd.encode("utf-8"))
-            print("[SERIAL<-MQTT]", cmd.strip())
+            ser.write(line.encode("utf-8"))
+            print("[SERIAL<-MQTT]", line.strip())
         except Exception as e:
             print("[SERIAL] write error:", e)
+
+    # 보정 명령: UNO로 "CORR\n"만 내려주면 됨
+    elif msg.topic == "line1/cmd/corr":
+        try:
+            ser.write(b"CORR\n")
+            print("[SERIAL<-MQTT] CORR")
+        except Exception as e:
+            print("[SERIAL] write error (CORR):", e)
 
 
 client.on_connect = on_connect
 client.on_message = on_message
 
-
 print("[MQTT] connecting...")
-client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
+client.connect(MQTT_HOST, MQTT_PORT, 60)
 client.loop_start()
 print("[MQTT] loop started")
 
 print("=== Serial <-> MQTT bridge started ===")
-
 
 # =========================
 # 메인 루프: UNO → MQTT
@@ -89,22 +105,17 @@ print("=== Serial <-> MQTT bridge started ===")
 try:
     while True:
         raw = ser.readline()
-
         if not raw:
             time.sleep(0.01)
             continue
 
-        try:
-            line = raw.decode("utf-8", errors="ignore").strip()
-        except Exception:
-            continue
-
+        line = raw.decode("utf-8", errors="ignore").strip()
         if not line:
             continue
 
         print("[SERIAL]", line)
 
-        # UNO → MQTT : "P:topic:payload"
+        # UNO가 sendMqttPublish로 보낸 라인: P:topic:payload 형태
         if line.startswith("P:"):
             try:
                 _, topic, payload = line.split(":", 2)

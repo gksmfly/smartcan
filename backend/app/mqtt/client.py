@@ -1,65 +1,72 @@
 # app/mqtt/client.py
 
+from __future__ import annotations
+
 import json
 import threading
+import time
 from typing import Any, Dict
 
 import paho.mqtt.client as mqtt
 
 from app.core.config import settings
 from app.db.session import SessionLocal
-from app.services.cycles_service import (
-    log_can_in_event,
-    log_fill_result_event,
-    get_recent_cycles_for_sku,
-)
-from app.services.recipes_service import get_recipe_by_sku_id
-from app.services.r2r import compute_next_valve_time
-from app.ml.lstm_a import get_lstm_a_model
+from app.ml.lstm_a import compute_next_valve_time
+from app.services.cycles_service import log_can_in_event, log_fill_result_event
+from app.ws.bus import ws_bus
 
-TOPIC_CAN_IN = "line1/event/can_in"
-TOPIC_FILL_RESULT = "line1/event/fill_result"
-TOPIC_CMD_FILL = "line1/cmd/fill"
+# 토픽 정의
+TOPIC_CAN_IN = "line1/event/can_in"            # UNO → ESP → MQTT (RFID 태깅)
+TOPIC_FILL_RESULT = "line1/event/fill_result"  # UNO → ESP → MQTT (충전 결과)
+TOPIC_CMD_FILL = "line1/cmd/fill"              # 서버 → ESP → UNO (fill 명령)
+TOPIC_CMD_CORR = "line1/cmd/corr"             # 서버 → ESP → UNO (보정 명령)
 
 
 class SmartCanMqttClient:
-    def __init__(self):
+    def __init__(self) -> None:
         client_id = settings.MQTT_CLIENT_ID or "smartcan-backend"
         self.client = mqtt.Client(client_id=client_id, clean_session=True)
+
+        # 필요시 계정
+        # if settings.MQTT_USERNAME:
+        #     self.client.username_pw_set(
+        #         settings.MQTT_USERNAME,
+        #         settings.MQTT_PASSWORD,
+        #     )
 
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
 
-    # -------------------------------------------------------------
-    # MQTT START
-    # -------------------------------------------------------------
-    def start(self):
+    # ========== 시작 ==========
+
+    def start(self) -> None:
         host = settings.MQTT_BROKER_HOST
         port = settings.MQTT_BROKER_PORT
 
-        print(f"[MQTT] Connecting to {host}:{port}")
+        print(f"[MQTT] Connecting to {host}:{port} (id={self.client._client_id})")
         self.client.connect(host, port, keepalive=60)
 
         t = threading.Thread(target=self.client.loop_forever, daemon=True)
         t.start()
-        print("[MQTT] loop started")
+        print("[MQTT] loop thread started")
 
-    # -------------------------------------------------------------
-    # CALLBACK
-    # -------------------------------------------------------------
-    def _on_connect(self, client, userdata, flags, rc, properties=None):
-        print(f"[MQTT] Connected rc={rc}")
+    # ========== 콜백 ==========
+
+    def _on_connect(self, client, userdata, flags, reason_code, properties=None):
+        print(f"[MQTT] Connected rc={reason_code}")
         client.subscribe(TOPIC_CAN_IN, qos=1)
         client.subscribe(TOPIC_FILL_RESULT, qos=1)
-        print(f"[MQTT] Subscribed {TOPIC_CAN_IN}, {TOPIC_FILL_RESULT}")
+        print(f"[MQTT] Subscribed: {TOPIC_CAN_IN}, {TOPIC_FILL_RESULT}")
 
     def _on_message(self, client, userdata, msg):
         try:
-            payload_str = msg.payload.decode()
+            payload_str = msg.payload.decode("utf-8")
             print(f"[MQTT] recv topic={msg.topic} payload={payload_str}")
+            if not payload_str:
+                return
             data = json.loads(payload_str)
         except Exception as e:
-            print("[MQTT] decode error:", e)
+            print("[MQTT] payload decode error:", e)
             return
 
         if msg.topic == TOPIC_CAN_IN:
@@ -67,104 +74,113 @@ class SmartCanMqttClient:
         elif msg.topic == TOPIC_FILL_RESULT:
             self._handle_fill_result(data)
 
-    # -------------------------------------------------------------
-    # CAN_IN 핸들러
-    # -------------------------------------------------------------
-    def _handle_can_in(self, data: Dict[str, Any]):
-        """
-        { "seq":1, "uid":"XXXX", "sku":"COKE_355", "target_ml":355.0 }
-        """
+    # ========== CAN_IN 핸들러 ==========
+
+    def _handle_can_in(self, data: Dict[str, Any]) -> None:
+        """line1/event/can_in"""
         db = SessionLocal()
         try:
-            sku_id = str(data.get("sku"))
-            cycle_no = int(data.get("seq"))
-            target_ml = float(data.get("target_ml"))
+            sku_id = str(data.get("sku") or data.get("sku_id") or "UNKNOWN")
+            cycle_no = int(data.get("seq") or data.get("cycle_no") or 0)
+            target_amount = float(data.get("target_ml") or data.get("target_amount") or 0.0)
 
-            print(f"[MQTT] CAN_IN sku={sku_id}, seq={cycle_no}, target={target_ml}")
+            print(f"[MQTT] CAN_IN sku_id={sku_id} cycle_no={cycle_no} target={target_amount}")
 
-            # 1) 레시피 로드
-            recipe = get_recipe_by_sku_id(db, sku_id)
-            if not recipe:
-                raise Exception(f"Recipe not found for sku={sku_id}")
+            # 1) LSTM-A(+R2R)로 밸브 시간 계산
+            valve_time = compute_next_valve_time(db, sku_id=sku_id, target_amount=target_amount)
 
-            # 2) 최근 cycle 50개 로드
-            recent = get_recent_cycles_for_sku(db, sku=sku_id, limit=50)
-
-            # 3) LSTM-A 모델 로드
-            lstm_a = get_lstm_a_model()
-            predicted_next_amount = lstm_a.predict_next_amount(recipe, recent)
-
-            # 4) R2R로 next valve 시간 계산
-            next_valve_ms = compute_next_valve_time(
-                recipe=recipe,
-                recent_cycles=recent,
-                predicted_next_amount=predicted_next_amount,
-            )
-
-            # 5) DB에 can_in 이벤트 기록
-            cycle_payload = {
+            # 2) DB 기록
+            cycle = log_can_in_event(db, {
                 "seq": cycle_no,
                 "sku": sku_id,
-                "target_ml": target_ml,
-                "valve_ms": next_valve_ms,
-            }
-            cycle = log_can_in_event(db, cycle_payload)
+                "target_ml": target_amount,
+                "valve_ms": valve_time,
+            })
 
-            # 6) UNO로 fill 명령 전송
-            cmd = {
+            # 3) 장비로 fill 명령
+            cmd_payload = {
                 "sku": cycle.sku,
                 "seq": cycle.seq,
                 "target_ml": cycle.target_ml,
-                "valve_ms": next_valve_ms,
+                "valve_ms": valve_time,
                 "mode": "SIM",
             }
-            self.publish_fill_command(cmd)
+            self.publish_fill_command(cmd_payload)
+
+            # 4) Option C: 관리자 WS로 이벤트 push
+            ws_bus.emit({
+                "type": "can_in",
+                "ts": int(time.time()),
+                "data": {
+                    "seq": cycle.seq,
+                    "sku_id": cycle.sku,
+                    "target_ml": float(cycle.target_ml),
+                    "valve_ms": float(valve_time),
+                },
+            })
 
             db.commit()
-
         except Exception as e:
             db.rollback()
             print("[MQTT] handle_can_in error:", e)
         finally:
             db.close()
 
-    # -------------------------------------------------------------
-    # FILL_RESULT 핸들러
-    # -------------------------------------------------------------
-    def _handle_fill_result(self, data: Dict[str, Any]):
-        """
-        {
-          "seq":1, "sku":"COKE_355",
-          "actual_ml":350.5, "target_ml":355.0,
-          "valve_ms":300, "status":"OK"
-        }
-        """
+    # ========== FILL_RESULT 핸들러 ==========
+
+    def _handle_fill_result(self, data: Dict[str, Any]) -> None:
+        """line1/event/fill_result"""
         db = SessionLocal()
         try:
-            payload = {
-                "seq": int(data.get("seq")),
-                "sku": data.get("sku"),
-                "actual_ml": float(data.get("actual_ml")),
-                "target_ml": float(data.get("target_ml")),
-                "valve_ms": float(data.get("valve_ms")),
-                "status": data.get("status", "DONE"),
-            }
-            log_fill_result_event(db, payload)
-            db.commit()
+            cycle_no = int(data.get("seq") or data.get("cycle_no") or 0)
+            sku_id = str(data.get("sku") or data.get("sku_id") or "UNKNOWN")
+            measured_value = float(data.get("actual_ml") or data.get("measured_value") or 0.0)
+            target_ml = float(data.get("target_ml") or data.get("target_amount") or 0.0)
+            valve_time = float(data.get("valve_ms") or data.get("valve_time") or 0.0)
+            status = str(data.get("status", "DONE"))
 
+            cycle = log_fill_result_event(db, {
+                "seq": cycle_no,
+                "sku": sku_id,
+                "actual_ml": measured_value,
+                "target_ml": target_ml,
+                "valve_ms": valve_time,
+                "status": status,
+            })
+
+            # Option C: WS push (fill_result)
+            ws_bus.emit({
+                "type": "fill_result",
+                "ts": int(time.time()),
+                "data": {
+                    "seq": cycle.seq,
+                    "sku_id": cycle.sku,
+                    "target_ml": float(cycle.target_ml or target_ml),
+                    "actual_ml": float(cycle.actual_ml or measured_value),
+                    "valve_ms": float(cycle.valve_ms or valve_time),
+                    "status": status,
+                },
+            })
+
+            db.commit()
         except Exception as e:
             db.rollback()
             print("[MQTT] handle_fill_result error:", e)
         finally:
             db.close()
 
-    # -------------------------------------------------------------
-    # publish helper
-    # -------------------------------------------------------------
-    def publish_fill_command(self, payload: Dict[str, Any]):
+    # ========== publish 헬퍼 ==========
+
+    def publish_fill_command(self, payload: Dict[str, Any]) -> None:
         data_str = json.dumps(payload, ensure_ascii=False)
         print(f"[MQTT] publish -> {TOPIC_CMD_FILL}: {data_str}")
-        self.client.publish(TOPIC_CMD_FILL, data_str, qos=1)
+        self.client.publish(TOPIC_CMD_FILL, data_str, qos=1, retain=False)
+
+    def publish_corr_command(self, payload: Dict[str, Any]) -> None:
+        """서버 → ESP/브리지 → UNO 방향 보정(CORR) 명령"""
+        data_str = json.dumps(payload, ensure_ascii=False)
+        print(f"[MQTT] publish -> {TOPIC_CMD_CORR}: {data_str}")
+        self.client.publish(TOPIC_CMD_CORR, data_str, qos=1, retain=False)
 
 
 mqtt_client = SmartCanMqttClient()
