@@ -120,3 +120,38 @@ _lstmA = LstmAController()
 
 def get_lstm_a_model():
     return _lstmA
+# -------------------------------------------------------------
+# Backward-compatible helper (DB signature)
+# -------------------------------------------------------------
+def compute_next_valve_time(db, sku_id: str, target_amount: float | None = None) -> float:
+    """
+    기존 코드(REST/control.py, mqtt/client.py)가 호출하던 DB 기반 시그니처 호환용 함수.
+    - DB에서 recipe / recent cycles를 로드한 뒤
+    - services.r2r.compute_next_valve_time(recipe, recent_cycles, ...)로 계산한다.
+    """
+    # 지연 import로 순환참조 방지
+    from app.services import cycles_service, recipes_service
+    from app.services.r2r import compute_next_valve_time as _r2r_compute
+
+    # recipe 로드(서비스 시그니처 차이 방어)
+    recipe = None
+    try:
+        recipe = recipes_service.get_recipe_by_sku_id(db, sku_id)
+    except TypeError:
+        recipe = recipes_service.get_recipe_by_sku_id(db, sku_id=sku_id)
+
+    if recipe is None:
+        raise ValueError(f"Recipe not found for sku_id={sku_id}")
+
+    # recent cycles 로드(서비스 시그니처 차이 방어)
+    try:
+        recent = cycles_service.get_recent_cycles_for_sku(db, sku=sku_id, limit=50)
+    except TypeError:
+        recent = cycles_service.get_recent_cycles_for_sku(db, sku_id, 50)
+
+    # target_amount가 '예측값'이 아니라 '목표값'일 수 있어서, 없으면 None 처리
+    predicted_next_amount = None
+    if target_amount is not None:
+        predicted_next_amount = float(target_amount)
+
+    return float(_r2r_compute(recipe=recipe, recent_cycles=recent, predicted_next_amount=predicted_next_amount))
