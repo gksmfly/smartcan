@@ -1,6 +1,6 @@
 # SmartCan (Mobile Programming Final)
 **핵심:** Android 앱이 **모니터링 + 제어(오차보정) + 데이터소스 전환(LOCAL/FIREBASE/SERVER)** 을 담당하고,  
-서버/장비/대시보드는 앱 기능을 **확장(3단계)** 하는 형태로 설계함.
+서버/장비/대시보드는 앱 기능을 **확장(3단계)** 하는 형태로 설계했다.
 
 - **LOCAL**: SQLite
 - **FIREBASE**: Firestore  
@@ -10,12 +10,12 @@
 ---
 
 ## 0) 전체 파이프라인
-아두이노( RFID 태깅→충진 수행/결과 전송 )가 이벤트를 서버(FastAPI)로 보내면 서버가 Neon(PostgreSQL)에 기록하면서 LSTM·SPC·CUSUM·R2R로 오차를 감지/보정해 다음 충진 명령을 내려주고, 그 과정이 WebSocket(/admin)으로 실시간 스트리밍되며 Grafana에서 지표로 집계되고 Android 앱은 LOCAL(SQLite)/FIREBASE(Firestore)/SERVER(REST) 모드로 이를 조회·모니터링함.
+아두이노( RFID 태깅→충진 수행/결과 전송 )가 이벤트를 서버(FastAPI)로 보내면 서버가 Neon(PostgreSQL)에 기록하면서 LSTM·SPC·CUSUM·R2R로 오차를 감지/보정해 다음 충진 명령을 내려주고, 그 과정이 WebSocket(/admin)으로 실시간 스트리밍되며 Grafana에서 지표로 집계되고 Android 앱은 LOCAL(SQLite)/FIREBASE(Firestore)/SERVER(REST) 모드로 이를 조회·모니터링한다.
 
 ---
 
 ## 1) “모바일 앱”이 중심인 이유
-SmartCan은 서버/하드웨어가 있는 프로젝트지만, **사용자가 실제로 조작·확인하는 중심은 Android 앱**임.
+SmartCan은 서버/하드웨어가 있는 프로젝트지만, **사용자가 실제로 조작·확인하는 중심은 Android 앱**이다.
 
 앱이 하는 일:
 1. **모드 전환(LOCAL/FIREBASE/SERVER)**: 1·2·3단계를 앱 한 곳에서 체감 가능  
@@ -41,7 +41,7 @@ SmartCan은 서버/하드웨어가 있는 프로젝트지만, **사용자가 실
 ---
 
 ## 3) 앱 화면 구성(권장 시연 흐름)
-> “앱이 약해 보이지 않게” 발표/시연은 아래 3화면 중심으로 진행함.
+> “앱이 약해 보이지 않게” 발표/시연은 아래 3화면 중심으로 진행한다.
 
 ### 3.1 Dashboard(모니터링)
 - 현재 SKU/라인 상태
@@ -59,7 +59,7 @@ SmartCan은 서버/하드웨어가 있는 프로젝트지만, **사용자가 실
 ---
 
 ## 4) SmartCan의 핵심 장점: “자동 오류 보정”
-SmartCan의 차별점은 “기록/조회”가 아니라, **충진 오차를 감지하고 자동 보정 루프를 돌린다**는 점임.
+SmartCan의 차별점은 “기록/조회”가 아니라, **충진 오차를 감지하고 자동 보정 루프를 돌린다**는 점이다.
 
 - **LSTM**: SKU/이력 기반 밸브시간(Valve time) 추정
 - **SPC(관리도)**: 공정 분산/허용오차 기반 이상 판단
@@ -81,9 +81,6 @@ SmartCan의 차별점은 “기록/조회”가 아니라, **충진 오차를 �
 9. **(관리자)** `/admin`에서 WS 실시간 확인 + Grafana에서 알람/지표 추이 확인
 
 ---
-
-
-
 
 ## 6) 레포 구조
 ```
@@ -124,19 +121,19 @@ SERVER_PORT=8000
 MQTT_BROKER_HOST=localhost
 MQTT_BROKER_PORT=1883
 ```
-> ⚠️ `.env`는 커밋하지 않음.
+> ⚠️ `.env`는 커밋하지 않는다.
 
 ### 7.3 Android 실행(Android Studio)
 - `dashboard-app/`을 Android Studio로 열고 Run
 
 #### 모드 전환 방법(필수)
-`dashboard-app/app/build.gradle.kts`에서 단계별 `DATA_SOURCE` 값을 바꾸면 됨.
+`dashboard-app/app/build.gradle.kts`에서 단계별 `DATA_SOURCE` 값을 바꾸면 된다.
 
 - `"\"LOCAL\""`     // 1단계: SQLite  
 - `"\"FIREBASE\""`  // 2단계: Firebase(Firestore)  
 - `"\"SERVER\""`    // 3단계: FastAPI + PostgreSQL(Neon)
 
-✅ 변경 후 **상단의 `Sync Now`는 반드시 클릭**해야 적용됨.
+✅ 변경 후 **상단의 `Sync Now`는 반드시 클릭**해야 적용된다.
 
 **SERVER 모드 주소(중요)**
 - 에뮬레이터: `http://10.0.2.2:8000` (호스트 PC의 localhost)
