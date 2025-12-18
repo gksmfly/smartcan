@@ -13,6 +13,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.spcsingle.ui.theme.SpcsingleTheme
+import android.util.Log
 
 // 화면에 보이는 이름과 내부 ID를 분리
 data class SkuOption(
@@ -24,6 +25,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        Log.e("DATA_SOURCE", BuildConfig.DATA_SOURCE)
 
         setContent {
             SpcsingleTheme {
