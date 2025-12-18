@@ -104,7 +104,10 @@ abstract class AppDatabase : RoomDatabase() {
                         context.applicationContext,
                         AppDatabase::class.java,
                         "smartcan.db",
-                    ).build()
+                    )
+                        .createFromAsset("smartcan.db") // ⭐ assets에서 DB 복사
+                        .fallbackToDestructiveMigration()
+                        .build()
                         .also { INSTANCE = it }
             }
         }
