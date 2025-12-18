@@ -1,6 +1,7 @@
 # app/services/cycles_service.py
 
 from typing import List, Optional, Dict, Any
+from app.services import quality_service
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select, desc
@@ -8,8 +9,7 @@ from sqlalchemy import select, desc
 from app.db.models.cycle import Cycle
 from app.schemas.cycle import CycleCreate
 
-from app.services.quality_service import compute_spc_for_sku
-
+from app.services import line_state_service
 
 def create_cycle(db: Session, data: CycleCreate) -> Cycle:
     cycle = Cycle(
@@ -173,9 +173,8 @@ def log_fill_result_event(db: Session, payload: Dict[str, Any]) -> Cycle:
     db.add(cycle)
     db.commit()
     db.refresh(cycle)
+    
+    line_state_service.set_current_sku(db, sku=cycle.sku)
 
-    # 🔻 여기서 최근 error 시계열 기반으로 SPC/CUSUM 계산
-    info = compute_spc_for_sku(db, sku=cycle.sku)
-    # info["spc_state"]는 quality_service 안에서 마지막 cycle.spc_state에 이미 반영되게 짜두면 됨
-
+    
     return cycle

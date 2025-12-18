@@ -14,6 +14,9 @@ from app.schemas.cycle import CycleCreate
 from app.services import cycles_service, recipes_service
 from app.ml.lstm_a import compute_next_valve_time
 from app.ws.bus import ws_bus
+from app.services import line_state_service
+from sqlalchemy import select, desc
+from app.db.models.cycle import Cycle
 
 router = APIRouter(prefix="/control", tags=["control"])
 
@@ -27,10 +30,17 @@ class CurrentSku(BaseModel):
 # 간단히 메모리 보관(데모용). 실제 운영이면 DB/Redis 권장
 current_sku_state = CurrentSku(sku_id=None)
 
+@router.get("/current_sku")
+def current_sku(db: Session = Depends(get_db)):
+    sku = line_state_service.get_current_sku(db, line_id="line1")
 
-@router.get("/current_sku", response_model=CurrentSku)
-def get_current_sku():
-    return current_sku_state
+    # (보험) line_state가 비어있으면 최근 cycle sku로 fallback
+    if not sku:
+        sku = db.execute(
+            select(Cycle.sku).order_by(desc(Cycle.id)).limit(1)
+        ).scalar_one_or_none()
+
+    return {"sku_id": sku}
 
 
 @router.post("/current_sku", response_model=CurrentSku)

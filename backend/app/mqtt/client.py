@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import threading
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import paho.mqtt.client as mqtt
 
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.ml.lstm_a import compute_next_valve_time
+from app.services import line_state_service
 from app.services.cycles_service import log_can_in_event, log_fill_result_event
 from app.ws.bus import ws_bus
 
@@ -19,7 +20,18 @@ from app.ws.bus import ws_bus
 TOPIC_CAN_IN = "line1/event/can_in"            # UNO → ESP → MQTT (RFID 태깅)
 TOPIC_FILL_RESULT = "line1/event/fill_result"  # UNO → ESP → MQTT (충전 결과)
 TOPIC_CMD_FILL = "line1/cmd/fill"              # 서버 → ESP → UNO (fill 명령)
-TOPIC_CMD_CORR = "line1/cmd/corr"             # 서버 → ESP → UNO (보정 명령)
+TOPIC_CMD_CORR = "line1/cmd/corr"              # 서버 → ESP → UNO (보정 명령)
+
+
+def infer_target_ml_from_sku(sku_id: str) -> float:
+    """
+    예) COKE_355 -> 355.0, CIDER_500 -> 500.0
+    """
+    try:
+        tail = sku_id.split("_")[-1]
+        return float(tail)
+    except Exception:
+        return 0.0
 
 
 class SmartCanMqttClient:
@@ -80,9 +92,53 @@ class SmartCanMqttClient:
         """line1/event/can_in"""
         db = SessionLocal()
         try:
-            sku_id = str(data.get("sku") or data.get("sku_id") or "UNKNOWN")
-            cycle_no = int(data.get("seq") or data.get("cycle_no") or 0)
-            target_amount = float(data.get("target_ml") or data.get("target_amount") or 0.0)
+            raw_sku = data.get("sku") or data.get("sku_id")
+            raw_seq = data.get("seq") or data.get("cycle_no")
+
+            if not raw_sku or raw_seq is None:
+                print(f"[MQTT] can_in missing sku/seq: {data}")
+                return
+
+            sku_id = str(raw_sku).strip()
+            if not sku_id:
+                print(f"[MQTT] can_in empty sku: {data}")
+                return
+
+            try:
+                cycle_no = int(raw_seq)
+            except Exception:
+                print(f"[MQTT] can_in invalid seq: {data}")
+                return
+
+            # target_ml 없거나 0이면 SKU에서 추론
+            target_val = data.get("target_ml")
+            if target_val is None:
+                target_val = data.get("target_amount")
+
+            try:
+                target_amount = float(target_val) if target_val is not None else 0.0
+            except Exception:
+                target_amount = 0.0
+
+            if target_amount <= 0.0:
+                inferred = infer_target_ml_from_sku(sku_id)
+                if inferred > 0.0:
+                    target_amount = inferred
+
+            # ✅ current_sku는 can_in 성공/실패와 무관하게 먼저 저장(튐 방지)
+            try:
+                line_state_service.set_current_sku(db, sku=sku_id, line_id="line1")
+                # set_current_sku 내부에서 commit을 하든 안 하든, 여기서 한 번 더 커밋해도 안전
+                db.commit()
+            except Exception as e:
+                # current_sku 저장 실패해도 can_in 자체를 계속 진행할 수 있게
+                db.rollback()
+                print("[MQTT] set_current_sku failed:", repr(e))
+
+            # target_amount가 끝까지 0이면, log_can_in_event가 죽을 가능성이 높으니 여기서 중단
+            if target_amount <= 0.0:
+                print(f"[MQTT] CAN_IN target missing/invalid; skip cycle write. sku={sku_id} data={data}")
+                return
 
             print(f"[MQTT] CAN_IN sku_id={sku_id} cycle_no={cycle_no} target={target_amount}")
 
@@ -120,6 +176,7 @@ class SmartCanMqttClient:
             })
 
             db.commit()
+
         except Exception as e:
             db.rollback()
             print("[MQTT] handle_can_in error:", e)
@@ -133,11 +190,21 @@ class SmartCanMqttClient:
         db = SessionLocal()
         try:
             cycle_no = int(data.get("seq") or data.get("cycle_no") or 0)
-            sku_id = str(data.get("sku") or data.get("sku_id") or "UNKNOWN")
+            sku_id = str(data.get("sku") or data.get("sku_id") or "UNKNOWN").strip()
+
             measured_value = float(data.get("actual_ml") or data.get("measured_value") or 0.0)
             target_ml = float(data.get("target_ml") or data.get("target_amount") or 0.0)
             valve_time = float(data.get("valve_ms") or data.get("valve_time") or 0.0)
             status = str(data.get("status", "DONE"))
+
+            # (선택) fill_result로도 current_sku 갱신(안전망)
+            if sku_id and sku_id != "UNKNOWN":
+                try:
+                    line_state_service.set_current_sku(db, sku=sku_id, line_id="line1")
+                    db.commit()
+                except Exception as e:
+                    db.rollback()
+                    print("[MQTT] set_current_sku (fill_result) failed:", repr(e))
 
             cycle = log_fill_result_event(db, {
                 "seq": cycle_no,
@@ -184,3 +251,13 @@ class SmartCanMqttClient:
 
 
 mqtt_client = SmartCanMqttClient()
+
+
+def main():
+    mqtt_client.start()
+    while True:
+        time.sleep(1)
+
+
+if __name__ == "__main__":
+    main()

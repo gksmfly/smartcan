@@ -30,6 +30,7 @@ class LocalRepository(
     override suspend fun refreshDashboard(sku: String) {
         // 1단계: 서버 없음 → 아무것도 안 함
     }
+    override suspend fun fetchCurrentSku(): String? = "COKE_355"
 
     override suspend fun applyCorrection(sku: String) {
         // 1단계: 서버 없음

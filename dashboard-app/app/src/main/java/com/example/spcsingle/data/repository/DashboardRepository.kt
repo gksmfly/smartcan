@@ -8,4 +8,5 @@ interface DashboardRepository {
     ): Flow<DashboardUiState>
     suspend fun refreshDashboard(sku: String)
     suspend fun applyCorrection(sku: String)
+    suspend fun fetchCurrentSku(): String?
 }
