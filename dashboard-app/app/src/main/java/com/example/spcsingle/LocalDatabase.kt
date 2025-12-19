@@ -1,5 +1,5 @@
 // UI cache / offline fallback only
-
+//LocalDatabase.kt
 package com.example.spcsingle
 
 import android.content.Context
@@ -113,3 +113,4 @@ abstract class AppDatabase : RoomDatabase() {
         }
     }
 }
+
