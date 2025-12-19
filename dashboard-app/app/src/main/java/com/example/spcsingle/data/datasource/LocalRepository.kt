@@ -1,3 +1,4 @@
+//LocalRepository.kt
 package com.example.spcsingle.data.datasource
 
 import android.content.Context
@@ -35,4 +36,5 @@ class LocalRepository(
     override suspend fun applyCorrection(sku: String) {
         // 1단계: 서버 없음
     }
+
 }
