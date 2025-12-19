@@ -36,8 +36,18 @@ def list_cycles(
     stmt = select(Cycle).order_by(desc(Cycle.created_at)).limit(limit)
     if sku:
         stmt = stmt.where(Cycle.sku == sku)
+    stmt = stmt.order_by(desc(Cycle.id)).limit(limit)    
     return list(db.scalars(stmt))
-
+def _fallback_target_ml(db: Session, sku: str) -> float:
+    # 1) 같은 sku의 마지막 cycle target_ml 재사용 (없으면 0.0)
+    stmt = (
+        select(Cycle.target_ml)
+        .where(Cycle.sku == sku, Cycle.target_ml.is_not(None))
+        .order_by(desc(Cycle.id))
+        .limit(1)
+    )
+    last = db.execute(stmt).scalar_one_or_none()
+    return float(last) if last is not None else 0.0
 
 def get_cycle_by_id(db: Session, cycle_id: int) -> Optional[Cycle]:
     return db.get(Cycle, cycle_id)
@@ -89,26 +99,46 @@ def log_can_in_event(db: Session, payload: Dict[str, Any]) -> Cycle:
     """
     MQTT: line1/event/can_in
     payload 예:
-    {
-      "seq": 12,
-      "sku": "COKE_355",
-      "target_ml": 355.0,
-      "mode": "NORMAL"
-    }
+    {"seq":12,"sku":"COKE_355"}
+    또는 {"seq":12,"sku":"COKE_355","target_ml":355.0}
     """
-    seq = payload.get("seq") or payload.get("can_seq")
+    seq = payload.get("seq") or payload.get("can_seq") or payload.get("cycle_no")
     sku = payload.get("sku") or payload.get("sku_id")
-    target_ml = payload.get("target_ml") or payload.get("target_amount")
 
-    if seq is None or sku is None or target_ml is None:
+    if seq is None or sku is None:
         raise ValueError(f"invalid can_in payload: {payload}")
+
+    seq = int(seq)
+    sku = str(sku)
+
+    # target_ml 은 없어도 됨(태깅은 보통 sku/seq만 옴)
+    raw_target = payload.get("target_ml") or payload.get("target_amount")
+    try:
+        target_ml = float(raw_target) if raw_target is not None else 0.0
+    except Exception:
+        target_ml = 0.0
+
+    if target_ml <= 0:
+        target_ml = _fallback_target_ml(db, sku)
+
+    valve_ms = payload.get("valve_ms") or payload.get("valve_time")
+    try:
+        valve_ms = float(valve_ms) if valve_ms is not None else 0.0
+    except Exception:
+        valve_ms = 0.0
 
     existing = _find_cycle_by_seq_and_sku(db, seq=seq, sku=sku)
     if existing:
         existing.target_ml = target_ml
+        existing.valve_ms = valve_ms
         db.add(existing)
         db.commit()
         db.refresh(existing)
+        # current_sku 갱신(시그니처 차이 방어)
+        try:
+            line_state_service.set_current_sku(db, line_id="line1", sku=sku)
+        except TypeError:
+            line_state_service.set_current_sku(db, sku=sku)
         return existing
 
     cycle = Cycle(
@@ -116,7 +146,7 @@ def log_can_in_event(db: Session, payload: Dict[str, Any]) -> Cycle:
         sku=sku,
         target_ml=target_ml,
         actual_ml=None,
-        valve_ms=payload.get("valve_ms", 0.0),
+        valve_ms=valve_ms,
         error=None,
         next_valve_ms=None,
         spc_state=None,
@@ -124,6 +154,12 @@ def log_can_in_event(db: Session, payload: Dict[str, Any]) -> Cycle:
     db.add(cycle)
     db.commit()
     db.refresh(cycle)
+
+    try:
+        line_state_service.set_current_sku(db, line_id="line1", sku=sku)
+    except TypeError:
+        line_state_service.set_current_sku(db, sku=sku)
+
     return cycle
 
 

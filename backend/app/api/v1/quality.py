@@ -23,29 +23,8 @@ def get_spc_state(
     - 여기서는 compute/recompute 하지 않습니다. (GET은 DB에 쓰지 않음)
     - 마지막으로 계산되어 저장된 spc_states 중 최신 1건을 반환합니다.
     """
-    rows = quality_service.list_spc_states(db, sku=sku, limit=1)
-
-    if not rows:
-        return SpcCurrentState(
-            spc_state="UNKNOWN",
-            alarm_type=None,
-            mean=None,
-            std=None,
-            cusum_pos=0.0,
-            cusum_neg=0.0,
-            n_samples=0,
-        )
-
-    latest = rows[0]
-    return SpcCurrentState(
-        spc_state=latest.spc_state,
-        alarm_type=getattr(latest, "alarm_type", None),
-        mean=getattr(latest, "mean", None),
-        std=getattr(latest, "std", None),
-        cusum_pos=getattr(latest, "cusum_pos", 0.0),
-        cusum_neg=getattr(latest, "cusum_neg", 0.0),
-        n_samples=getattr(latest, "n_samples", 0),
-    )
+    info = quality_service.read_current_spc_state(db, sku=sku)
+    return SpcCurrentState(**info)
 
 
 @router.get("/spc_states", response_model=List[SpcStateOut])
