@@ -1,3 +1,4 @@
+//QualityDtos.kt
 package com.example.spcsingle
 import kotlin.math.roundToInt
 // /quality/spc_state 응답
@@ -89,3 +90,4 @@ fun AlarmDto.toEntity(): AlarmEntity =
         spcStateId = spc_state_id,
         createdAt = created_at,
     )
+
