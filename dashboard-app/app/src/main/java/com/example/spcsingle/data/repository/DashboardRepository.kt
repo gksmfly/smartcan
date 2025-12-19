@@ -1,3 +1,4 @@
+//DashboardRepository.kt
 package com.example.spcsingle.data.repository
 
 import com.example.spcsingle.DashboardUiState
@@ -9,4 +10,5 @@ interface DashboardRepository {
     suspend fun refreshDashboard(sku: String)
     suspend fun applyCorrection(sku: String)
     suspend fun fetchCurrentSku(): String?
+
 }
