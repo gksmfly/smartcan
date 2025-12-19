@@ -1,3 +1,4 @@
+//spcapi.kt
 package com.example.spcsingle
 
 import retrofit2.Retrofit
@@ -71,3 +72,4 @@ interface SpcApi {
                 .create(SpcApi::class.java)
     }
 }
+
