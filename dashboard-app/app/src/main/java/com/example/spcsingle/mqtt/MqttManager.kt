@@ -1,3 +1,4 @@
+//MqttManager.kt
 package com.example.spcsingle.mqtt
 
 import android.content.Context
@@ -90,3 +91,4 @@ class MqttManager(context: Context) {
         }
     }
 }
+
