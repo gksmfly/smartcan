@@ -1,3 +1,4 @@
+//SmartCanRepository.kt
 package com.example.spcsingle
 
 import kotlinx.coroutines.flow.Flow
@@ -28,3 +29,4 @@ class SmartCanRepository(
         db.alarmDao().insertAll(alarmsDto.map { it.toEntity() })
     }
 }
+
