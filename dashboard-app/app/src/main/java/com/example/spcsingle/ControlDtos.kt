@@ -1,3 +1,4 @@
+//ControlDtos.kt
 package com.example.spcsingle
 
 // === 센서 시뮬레이터 / 제어용 DTO ===
@@ -29,3 +30,4 @@ data class CorrectionRequest(
 data class CorrectionResponse(
     val status: String,   // 예: "CORRECTION_APPLIED"
 )
+
