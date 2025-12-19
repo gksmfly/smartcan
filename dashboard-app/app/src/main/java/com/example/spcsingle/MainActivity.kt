@@ -1,3 +1,4 @@
+//MainActivity.kt
 package com.example.spcsingle
 
 import android.os.Bundle
@@ -241,4 +242,5 @@ fun DashboardScreen(
             }
         }
     }
+
 }
