@@ -1,3 +1,4 @@
+//SimulatorViewModel.kt
 package com.example.spcsingle
 
 import android.app.Application
@@ -45,4 +46,5 @@ class SimulatorViewModel(
             repository.applyCorrection(_sku.value)
         }
     }
+
 }
