@@ -1,7 +1,7 @@
-//MainActivity.kt
 package com.example.spcsingle
 
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
@@ -14,12 +14,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.spcsingle.ui.theme.SpcsingleTheme
-import android.util.Log
 
 // 화면에 보이는 이름과 내부 ID를 분리
 data class SkuOption(
-    val id: String,    // 백엔드/UNO/DB 에 쓰는 값
-    val label: String, // 화면에 보여줄 이름
+    val id: String,
+    val label: String,
 )
 
 class MainActivity : ComponentActivity() {
@@ -33,7 +32,6 @@ class MainActivity : ComponentActivity() {
             SpcsingleTheme {
 
                 val dashboardVm: SpcViewModel = viewModel()
-
                 val dashboardState by dashboardVm.uiState.collectAsState()
                 val currentSku by dashboardVm.sku.collectAsState()
 
@@ -58,22 +56,40 @@ fun MainScreen(
     onSkuChange: (String) -> Unit,
     onApplyCorrection: () -> Unit,
 ) {
-    // 내부 ID는 CIDER_500, 화면 표시 이름은 CIDER_355
     val skuOptions = listOf(
-        SkuOption(id = "COKE_355",  label = "COKE_355"),
-        SkuOption(id = "CIDER_500", label = "CIDER_355"),
+        SkuOption("COKE_355", "COKE_355"),
+        SkuOption("CIDER_500", "CIDER_355"),
     )
 
-    // 현재 sku(id)에 대응되는 라벨
-    val currentSkuLabel = skuOptions.firstOrNull { it.id == sku }?.label ?: sku
+    val currentSkuLabel =
+        skuOptions.firstOrNull { it.id == sku }?.label ?: sku
 
     var expanded by remember { mutableStateOf(false) }
+
+    // ⭐ ADDED: DATA SOURCE 라벨 매핑
+    val dataSourceLabel = when (BuildConfig.DATA_SOURCE) {
+        "LOCAL" -> "LOCAL (Offline Simulation)"
+        "FIREBASE" -> "FIREBASE (Realtime Sync)"
+        "SERVER" -> "SERVER (Live API)"
+        else -> BuildConfig.DATA_SOURCE
+    }
 
     Scaffold(
         topBar = {
             Column {
                 TopAppBar(
                     title = { Text("SmartCan SPC Dashboard") },
+                )
+
+                // ⭐ ADDED: DATA SOURCE 표시 (캡처용)
+                Text(
+                    text = "DATA SOURCE: $dataSourceLabel",
+                    fontSize = MaterialTheme.typography.labelMedium.fontSize,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
                 )
 
                 Row(
@@ -96,7 +112,6 @@ fun MainScreen(
                                 DropdownMenuItem(
                                     text = { Text(option.label) },
                                     onClick = {
-                                        // 화면엔 355, 내부에선 500 같은 ID로 전달
                                         onSkuChange(option.id)
                                         expanded = false
                                     },
@@ -160,9 +175,7 @@ fun DashboardScreen(
                 )
             }
 
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-            ) {
+            Card(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -182,7 +195,6 @@ fun DashboardScreen(
                 }
             }
 
-            // UNO 파란불 + 355 트리거 버튼
             Button(
                 onClick = onApplyCorrection,
                 modifier = Modifier.fillMaxWidth(),
@@ -198,18 +210,12 @@ fun DashboardScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(state.cycles) { cycle ->
-                    // 로그에서도 CIDER_500 → CIDER_355 로 표기
-                    val skuLabel =
-                        if (cycle.sku == "CIDER_500") "CIDER_355" else cycle.sku
-
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
+                    Card(modifier = Modifier.fillMaxWidth()) {
                         Column(
                             modifier = Modifier.padding(8.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            Text("seq=${cycle.seq}, sku=$skuLabel")
+                            Text("seq=${cycle.seq}, sku=${cycle.sku}")
                             Text("target=${cycle.targetMl}, actual=${cycle.actualMl ?: "-"}")
                             Text("error=${cycle.error ?: "-"}, spc=${cycle.spcState ?: "-"}")
                             Text("time=${cycle.createdAt}")
@@ -226,9 +232,7 @@ fun DashboardScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(state.alarms) { alarm ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
+                    Card(modifier = Modifier.fillMaxWidth()) {
                         Column(
                             modifier = Modifier.padding(12.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -242,5 +246,4 @@ fun DashboardScreen(
             }
         }
     }
-
 }
